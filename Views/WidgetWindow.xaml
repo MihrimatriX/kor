@@ -1,0 +1,268 @@
+<Window x:Class="Kor.Views.WidgetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:Kor.Controls"
+        xmlns:vm="clr-namespace:Kor.ViewModels"
+        Title="Kor Widget"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        UseLayoutRounding="True"
+        Opacity="0"
+        FontFamily="{StaticResource F.Ui}"
+        Foreground="{DynamicResource B.Text}">
+
+    <Window.Resources>
+        <!-- Değer rengi: sıcaklık ve diskte sıcaklığa göre, diğerlerinde beyaz -->
+        <Style x:Key="RowValue" TargetType="TextBlock" BasedOn="{StaticResource T.Num}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="Temperature">
+                    <Setter Property="Foreground" Value="{Binding Accent}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="Disk">
+                    <Setter Property="Foreground" Value="{Binding Accent}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="Fps">
+                    <Setter Property="Foreground" Value="{Binding Accent}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Halka modundaki sade satır: ad solda, değer sağda -->
+        <DataTemplate x:Key="SimpleRow" DataType="{x:Type vm:WidgetRow}">
+            <Grid Height="24">
+                <TextBlock Text="{Binding Label}" FontSize="12" Foreground="{DynamicResource B.Text2}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" MaxWidth="150" HorizontalAlignment="Left" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Extra}" FontSize="11" Foreground="{DynamicResource B.Text3}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Value}" Style="{StaticResource RowValue}" FontSize="14" />
+                    <TextBlock Text="{Binding Unit}" FontSize="9.5" Foreground="{DynamicResource B.Text3}" Margin="2,2,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Liste modu: ad | çubuk | değer -->
+        <DataTemplate x:Key="BarRow" DataType="{x:Type vm:WidgetRow}">
+            <Grid Height="26">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="86" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" MinWidth="58" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}" FontSize="12" Foreground="{DynamicResource B.Text2}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <c:BarMeter Grid.Column="1" Value="{Binding Fraction}" Fill="{Binding BarBrush}" Height="4" VerticalAlignment="Center" Margin="2,0,12,0"
+                            Visibility="{Binding HasBar, Converter={StaticResource BoolVis}}" />
+                <TextBlock Grid.Column="1" Text="{Binding Extra}" FontSize="11.5" Foreground="{DynamicResource B.Text3}" VerticalAlignment="Center"
+                           Visibility="{Binding HasBar, Converter={StaticResource BoolVis}, ConverterParameter=invert}" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Value}" Style="{StaticResource RowValue}" FontSize="14" />
+                    <TextBlock Text="{Binding Unit}" FontSize="9.5" Foreground="{DynamicResource B.Text3}" Margin="2,2,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Şerit modu: tek satır -->
+        <DataTemplate x:Key="StripItem" DataType="{x:Type vm:WidgetRow}">
+            <StackPanel Orientation="Horizontal" Margin="0,0,16,0" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Label}" FontFamily="{StaticResource F.Label}" FontSize="11" Foreground="{DynamicResource B.Text3}"
+                           VerticalAlignment="Center" Margin="0,1,6,0" MaxWidth="110" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Value}" Style="{StaticResource RowValue}" FontSize="14" />
+                <TextBlock Text="{Binding Unit}" FontSize="9.5" Foreground="{DynamicResource B.Text3}" Margin="2,2,0,0" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Extra}" FontSize="11.5" Foreground="{DynamicResource B.Text3}" Margin="6,1,0,0" VerticalAlignment="Center">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Kind}" Value="Network">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Kind}" Value="Fps">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Oyun varken her modun en üstündeki FPS satırı -->
+        <DataTemplate x:Key="FpsHeader" DataType="{x:Type vm:WidgetRow}">
+            <Border CornerRadius="10" Background="{DynamicResource B.Subtle}" Padding="10,5,10,5">
+                <Grid>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <c:Icon Data="{StaticResource Icon.Game}" Foreground="{Binding Accent}" Width="16" Height="16" StrokeThickness="1.7" />
+                        <TextBlock Text="{Binding Label}" Margin="7,0,0,0" FontSize="12" Foreground="{DynamicResource B.Text2}" VerticalAlignment="Center"
+                                   MaxWidth="110" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Extra}" FontSize="11" Foreground="{DynamicResource B.Text3}" Margin="0,1,10,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Value}" Style="{StaticResource T.Num}" FontSize="19" Foreground="{Binding Accent}" VerticalAlignment="Center" />
+                        <TextBlock Text="FPS" FontSize="9.5" Foreground="{DynamicResource B.Text3}" Margin="3,4,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <ItemsPanelTemplate x:Key="HorizontalPanel">
+            <StackPanel Orientation="Horizontal" />
+        </ItemsPanelTemplate>
+
+        <!-- Fare üzerindeyken beliren köşe düğmeleri -->
+        <Style x:Key="HoverReveal" TargetType="FrameworkElement">
+            <Setter Property="Opacity" Value="0" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.25" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid x:Name="Root" Margin="18">
+        <Grid.LayoutTransform>
+            <ScaleTransform ScaleX="{Binding Config.Scale}" ScaleY="{Binding Config.Scale}" />
+        </Grid.LayoutTransform>
+
+        <!-- Koyu cam zemin + gölge (metinden ayrı katman) -->
+        <Border CornerRadius="18" BorderThickness="1" BorderBrush="{DynamicResource B.GlassBorder}">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0.35,1" Opacity="{Binding Config.Opacity}">
+                    <GradientStop Color="{DynamicResource C.WidgetTop}" Offset="0" />
+                    <GradientStop Color="{DynamicResource C.WidgetBottom}" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="22" ShadowDepth="5" Direction="270" Opacity="{DynamicResource ShadowOpacity}" Color="Black" />
+            </Border.Effect>
+        </Border>
+        <Border CornerRadius="18" Background="{DynamicResource B.Sheen}" IsHitTestVisible="False" />
+
+        <Grid Margin="16,14,16,14">
+            <TextBlock Text="Sensörler okunuyor…" Style="{StaticResource T.Body}" Margin="24,10"
+                       Visibility="{Binding Main.IsLoading, Converter={StaticResource BoolVis}}" />
+
+            <!-- ================= HALKALAR ================= -->
+            <StackPanel Width="288" Visibility="{Binding Config.Mode, Converter={StaticResource EqVis}, ConverterParameter=Rings}">
+                <ContentControl Content="{Binding FpsRow}" ContentTemplate="{StaticResource FpsHeader}" Focusable="False" Margin="0,0,0,12"
+                                Visibility="{Binding HasFps, Converter={StaticResource BoolVis}}" />
+                <ItemsControl ItemsSource="{Binding Heroes}" Focusable="False" Margin="0,2,0,0"
+                              Visibility="{Binding HasHeroes, Converter={StaticResource BoolVis}}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Rows="1" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel HorizontalAlignment="Center">
+                                <Grid Width="84" Height="84">
+                                    <c:RingGauge Value="{Binding Temp.Fraction}" Stroke="{Binding Temp.Accent}" Thickness="6.5" />
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,4">
+                                        <TextBlock x:Name="val" Text="{Binding Temp.ValueText}" Style="{StaticResource T.Num}" FontSize="26" />
+                                        <TextBlock Text="°" Style="{StaticResource T.Num}" FontSize="15" Foreground="{Binding Temp.Accent}" Margin="1,3,0,0" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding Label}" Style="{StaticResource T.Caps}" Foreground="{DynamicResource B.Text2}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                                </Grid>
+                                <Grid Margin="0,4,0,0" HorizontalAlignment="Center" MaxWidth="92">
+                                    <TextBlock FontSize="11" Foreground="{DynamicResource B.Text3}" HorizontalAlignment="Center"
+                                               Visibility="{Binding HasLoad, Converter={StaticResource BoolVis}}">
+                                        <Run Text="Yük" /> <Run Text="{Binding Load.Display, Mode=OneWay}" Foreground="{DynamicResource B.Text2}" />
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Caption}" FontSize="11" Foreground="{DynamicResource B.Text3}" HorizontalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Visibility="{Binding HasLoad, Converter={StaticResource BoolVis}, ConverterParameter=invert}" />
+                                </Grid>
+                            </StackPanel>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding Temp.IsHot}" Value="True">
+                                    <Setter TargetName="val" Property="Foreground" Value="{Binding Temp.Accent}" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border Height="1" Background="{DynamicResource B.Line}" Margin="2,12,2,6" Visibility="{Binding ShowRingDivider, Converter={StaticResource BoolVis}}" />
+
+                <ItemsControl ItemsSource="{Binding LoadRows}" ItemTemplate="{StaticResource SimpleRow}" Focusable="False"
+                              Visibility="{Binding LoadUnderRings, Converter={StaticResource BoolVis}, ConverterParameter=invert}" />
+                <ItemsControl ItemsSource="{Binding WidgetRows}" ItemTemplate="{StaticResource SimpleRow}" Focusable="False" />
+                <Border Margin="0,10,0,0" CornerRadius="8" Background="{DynamicResource B.WarnSoft}" Padding="9,6" Cursor="Hand"
+                        MouseLeftButtonDown="OnHintClick" ToolTip="{Binding Main.DriverHint}"
+                        Visibility="{Binding Main.HasDriverHint, Converter={StaticResource BoolVis}}">
+                    <StackPanel Orientation="Horizontal">
+                        <c:Icon Data="{StaticResource Icon.Warn}" Foreground="{DynamicResource B.Warn}" Width="13" Height="13" />
+                        <TextBlock Text="Bazı sensörler okunamıyor" Margin="7,0,0,0" FontSize="11.5" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- ================= LİSTE ================= -->
+            <StackPanel Width="262" Visibility="{Binding Config.Mode, Converter={StaticResource EqVis}, ConverterParameter=List}">
+                <ContentControl Content="{Binding FpsRow}" ContentTemplate="{StaticResource FpsHeader}" Focusable="False" Margin="0,0,0,8"
+                                Visibility="{Binding HasFps, Converter={StaticResource BoolVis}}" />
+                <ItemsControl ItemsSource="{Binding HeroRows}" ItemTemplate="{StaticResource BarRow}" Focusable="False" />
+                <ItemsControl ItemsSource="{Binding LoadRows}" ItemTemplate="{StaticResource BarRow}" Focusable="False" />
+                <Border Height="1" Background="{DynamicResource B.Line}" Margin="0,6" Visibility="{Binding HasWidgetRows, Converter={StaticResource BoolVis}}" />
+                <ItemsControl ItemsSource="{Binding WidgetRows}" ItemTemplate="{StaticResource BarRow}" Focusable="False" />
+                <Border Margin="0,10,0,0" CornerRadius="8" Background="{DynamicResource B.WarnSoft}" Padding="9,6" Cursor="Hand"
+                        MouseLeftButtonDown="OnHintClick" ToolTip="{Binding Main.DriverHint}"
+                        Visibility="{Binding Main.HasDriverHint, Converter={StaticResource BoolVis}}">
+                    <StackPanel Orientation="Horizontal">
+                        <c:Icon Data="{StaticResource Icon.Warn}" Foreground="{DynamicResource B.Warn}" Width="13" Height="13" />
+                        <TextBlock Text="Bazı sensörler okunamıyor" Margin="7,0,0,0" FontSize="11.5" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- ================= ŞERİT ================= -->
+            <StackPanel Orientation="Horizontal" Margin="-4,-6,0,-6"
+                        Visibility="{Binding Config.Mode, Converter={StaticResource EqVis}, ConverterParameter=Strip}">
+                <Grid Width="12" Height="12" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <c:Icon Data="{StaticResource Icon.BrandRing}" Foreground="{DynamicResource B.Brand}" StrokeThickness="2.2" Width="12" Height="12" />
+                    <Ellipse Width="4" Height="4" Fill="{DynamicResource B.Accent}" />
+                </Grid>
+                <ContentControl Content="{Binding FpsRow}" ContentTemplate="{StaticResource StripItem}" Focusable="False"
+                                Visibility="{Binding HasFps, Converter={StaticResource BoolVis}}" />
+                <ItemsControl ItemsSource="{Binding HeroRows}" ItemTemplate="{StaticResource StripItem}" ItemsPanel="{StaticResource HorizontalPanel}" Focusable="False" />
+                <ItemsControl ItemsSource="{Binding LoadRows}" ItemTemplate="{StaticResource StripItem}" ItemsPanel="{StaticResource HorizontalPanel}" Focusable="False" />
+                <ItemsControl ItemsSource="{Binding StripRows}" ItemTemplate="{StaticResource StripItem}" ItemsPanel="{StaticResource HorizontalPanel}" Focusable="False" />
+                <c:Icon Data="{StaticResource Icon.Warn}" Foreground="{DynamicResource B.Warn}" Width="14" Height="14" VerticalAlignment="Center"
+                        ToolTip="{Binding Main.DriverHint}" Visibility="{Binding Main.HasDriverHint, Converter={StaticResource BoolVis}}" />
+            </StackPanel>
+
+            <!-- Köşe düğmeleri (halka ve liste modunda) -->
+            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-11,-11,0" CornerRadius="9" Background="{DynamicResource B.FloatingBg}" Padding="2"
+                    Style="{StaticResource HoverReveal}">
+                <Border.Visibility>
+                    <Binding Path="Config.Mode" Converter="{StaticResource EqVis}" ConverterParameter="!Strip" />
+                </Border.Visibility>
+                <StackPanel Orientation="Horizontal">
+                    <Button Style="{StaticResource Btn.Icon}" Width="24" Height="24" Tag="{StaticResource Icon.Expand}" ToolTip="Detaylar" Click="OnDetails" />
+                    <Button Style="{StaticResource Btn.Icon}" Width="24" Height="24" Tag="{StaticResource Icon.Sliders}" ToolTip="Ayarlar" Click="OnSettings" />
+                    <Button Style="{StaticResource Btn.Icon}" Width="24" Height="24" Tag="{StaticResource Icon.Close}" ToolTip="Widget'ı gizle (tepsiden geri açılır)" Click="OnHide" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

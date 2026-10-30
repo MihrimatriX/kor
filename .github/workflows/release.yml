@@ -1,0 +1,86 @@
+# v* etiketi gönderilince: taşınabilir exe + Inno Setup kurulumu derlenir ve GitHub Release oluşturulur.
+#   git tag v0.3.1 && git push origin v0.3.1
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Sürüm (ör. 0.3.1) — sadece derler, release oluşturmaz"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  INNO_VERSION: "6.7.3"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Sürümü belirle
+        id: ver
+        shell: pwsh
+        run: |
+          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '${{ github.event.inputs.version }}' }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Taşınabilir exe (self-contained, tek dosya)
+        shell: pwsh
+        run: >
+          dotnet publish Kor.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=none
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o artifacts/portable
+
+      - name: Inno Setup (NuGet'ten, sürümü sabit)
+        shell: pwsh
+        run: |
+          $url = "https://api.nuget.org/v3-flatcontainer/tools.innosetup/$env:INNO_VERSION/tools.innosetup.$env:INNO_VERSION.nupkg"
+          Invoke-WebRequest $url -OutFile inno.zip
+          Expand-Archive inno.zip -DestinationPath inno
+          & .\inno\tools\ISCC.exe "/DAppVersion=${{ steps.ver.outputs.version }}" installer\Kor.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Dosya adları ve sağlama toplamları
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item artifacts/portable/Kor.exe "dist/Kor-$v-portable.exe"
+          Copy-Item "artifacts/Kor-Setup-$v.exe" "dist/Kor-Setup-$v.exe"
+          Get-ChildItem dist -File | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS.txt -Encoding ascii
+          Get-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kor-${{ steps.ver.outputs.version }}
+          path: dist/*
+
+      - name: Sürüm notu yoksa kısa bir tane yaz
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $notes = "release-notes/$env:GITHUB_REF_NAME.md"
+          if (-not (Test-Path $notes)) { "Kor $env:GITHUB_REF_NAME" | Set-Content $notes -Encoding utf8 }
+
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Kor ${{ github.ref_name }}
+          body_path: release-notes/${{ github.ref_name }}.md
+          generate_release_notes: true
+          files: dist/*
