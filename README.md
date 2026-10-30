@@ -87,15 +87,15 @@ ISCC.exe /DAppVersion=0.3.0 installer\Kor.iss   # → artifacts\Kor-Setup-0.3.0.
 
 ### Yeni sürüm yayımlama
 
-`release-notes/vX.Y.Z.md` dosyasını yaz, sonra etiketi gönder:
+1. `Kor.csproj` içindeki `<Version>`'ı artır, `release-notes/vX.Y.Z.md` dosyasını yaz.
+2. GitHub'da **Releases › Draft a new release**, etiket `vX.Y.Z`, notu yapıştır, **Publish**. Ya da:
 
-```powershell
-git tag v0.3.1
-git push origin v0.3.1
-```
+   ```powershell
+   gh release create v0.3.1 --title "Kor v0.3.1" --notes-file release-notes/v0.3.1.md
+   ```
 
-GitHub Actions (`.github/workflows/release.yml`) Windows'ta taşınabilir exe ile kurulumu derler, SHA-256 toplamlarını
-çıkarır ve sürümü yayımlar. Uygulama açılışta yeni sürümü fark edip Ayarlar › Hakkında'da gösterir.
+GitHub Actions (`.github/workflows/release.yml`) sürüm yayımlanınca Windows'ta taşınabilir exe ile kurulumu derler,
+SHA-256 toplamlarını çıkarır ve dosyaları o sürüme ekler. Uygulama açılışta yeni sürümü fark edip Ayarlar › Hakkında'da gösterir.
 
 Komut satırı argümanları:
 
@@ -158,7 +158,7 @@ Assets/remote.html      Telefon paneli (gömülü kaynak, bağımlılıksız)
 Core/UpdateChecker.cs   GitHub Releases'tan yeni sürüm denetimi (sadece haber verir, indirmez)
 installer/Kor.iss       Inno Setup kurulum betiği (PawnIO seçeneği, "--exit" ile güvenli kapatma)
 docs/                   GitHub Pages sitesi (tek HTML, canlı widget örneği)
-.github/workflows/      build.yml (her push), release.yml (v* etiketi → exe + kurulum + sürüm)
+.github/workflows/      build.yml (her push), release.yml (sürüm yayımlanınca → exe + kurulum + SHA256SUMS)
 ```
 
 Veri akışı: `SensorService (arka plan thread)` → `HardwareSnapshot` → `Dispatcher.BeginInvoke`
