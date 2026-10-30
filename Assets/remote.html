@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1218">
+<title>Kor</title>
+<style>
+  :root {
+    --bg: #0E1218; --card: #141922; --line: #222A36; --text: #EEF2F7; --text2: #9AA4B2; --text3: #5F6B7A;
+    --track: rgba(255,255,255,.11); --accent: #FF7A45; --warn: #FBBF24; --danger: #F43F5E;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #F3F5F8; --card: #FFFFFF; --line: #E3E7ED; --text: #121826; --text2: #4A5565; --text3: #8A94A3; --track: rgba(0,0,0,.08); --warn: #B45309; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+  body { padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  .brand { font-weight: 600; letter-spacing: .02em; }
+  .machine { color: var(--text3); font-size: 13px; }
+  .status { margin-left: auto; font-size: 12px; color: var(--text3); font-variant-numeric: tabular-nums; }
+  .status.off { color: var(--danger); }
+  .card { background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 12px; }
+  .rings { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+  .ring { text-align: center; min-width: 0; }
+  .ring .dial { position: relative; width: 100%; max-width: 110px; margin: 0 auto; }
+  .ring svg { width: 100%; aspect-ratio: 1; display: block; }
+  .ring .val { position: absolute; left: 0; right: 0; top: 32%; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ring .lbl { position: absolute; left: 0; right: 0; bottom: 6%; font-size: 11px; color: var(--text2); letter-spacing: .06em; }
+  .ring .sub { font-size: 12px; color: var(--text3); margin-top: 2px; min-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .game { display: none; align-items: baseline; gap: 10px; }
+  .game.on { display: flex; }
+  .game .fps { font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .game .name { color: var(--text2); }
+  .game .low { margin-left: auto; color: var(--text3); font-size: 13px; }
+  .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row .l { color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .v { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+  .row .v small { color: var(--text3); font-weight: 400; margin-left: 6px; }
+  .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 2px; transition: width .4s ease; }
+  h2 { font-size: 13px; font-weight: 600; margin: 0 0 10px; display: flex; gap: 14px; align-items: center; }
+  h2 span { font-weight: 400; color: var(--text2); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+  h2 span i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+  canvas { width: 100%; height: 150px; display: block; }
+  .alerts div { padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .alerts div:first-child { border-top: 0; }
+  .alerts b { color: var(--warn); font-weight: 600; }
+  .alerts time { color: var(--text3); margin-right: 8px; font-variant-numeric: tabular-nums; }
+  #alertsCard { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot"></div>
+  <div><div class="brand">Kor</div><div class="machine" id="machine">—</div></div>
+  <div class="status" id="status">bağlanıyor…</div>
+</header>
+
+<div class="card game" id="game">
+  <div class="fps" id="fps">—</div><div>FPS</div><div class="name" id="gameName"></div><div class="low" id="low"></div>
+</div>
+
+<div class="card"><div class="rings" id="rings"></div></div>
+
+<div class="card"><h2>Sıcaklık · son 5 dk <span id="legend"></span></h2><canvas id="chart"></canvas></div>
+
+<div class="card" id="rows"></div>
+
+<div class="card alerts" id="alertsCard"><h2>Son uyarılar</h2><div id="alerts"></div></div>
+
+<script>
+const token = new URLSearchParams(location.search).get("t") || "";
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+
+function arc(fraction, color) {
+  const r = 42, c = 50, start = 135, sweep = 270;
+  const pt = a => [c + r * Math.cos(a * Math.PI / 180), c + r * Math.sin(a * Math.PI / 180)];
+  const path = s => { const [x0, y0] = pt(start), [x1, y1] = pt(start + s); return `M ${x0} ${y0} A ${r} ${r} 0 ${s > 180 ? 1 : 0} 1 ${x1} ${y1}`; };
+  const f = Math.max(0, Math.min(1, fraction || 0));
+  return `<svg viewBox="0 0 100 100"><path d="${path(sweep)}" fill="none" stroke="var(--track)" stroke-width="7" stroke-linecap="round"/>` +
+         (f > 0.004 ? `<path d="${path(sweep * f)}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round"/>` : "") + `</svg>`;
+}
+
+function render(d) {
+  $("machine").textContent = d.machine;
+  $("status").textContent = d.time;
+  $("status").classList.remove("off");
+
+  const g = $("game");
+  if (d.fps != null) {
+    g.classList.add("on");
+    $("fps").textContent = Math.round(d.fps);
+    $("gameName").textContent = d.game || "";
+    $("low").textContent = d.low1 != null ? `1% düşük ${Math.round(d.low1)}` : "";
+  } else g.classList.remove("on");
+
+  const rings = $("rings");
+  rings.replaceChildren(...d.heroes.map(h => {
+    const box = el("div", "ring"), dial = el("div", "dial");
+    dial.innerHTML = arc(h.fraction, h.color);
+    const v = el("div", "val", h.value + h.unit); v.style.color = h.hot ? h.color : "";
+    dial.append(v, el("div", "lbl", h.label));
+    box.append(dial, el("div", "sub", h.sub || ""));
+    return box;
+  }));
+
+  $("rows").replaceChildren(...d.rows.map(r => {
+    const row = el("div", "row");
+    const v = el("div", "v", r.value + (r.unit ? (r.unit === "°" ? r.unit : " " + r.unit) : ""));
+    if (r.extra) v.append(el("small", null, r.extra));
+    if (r.valueColor) v.style.color = r.valueColor;
+    row.append(el("div", "l", r.label), v);
+    if (r.fraction > 0) { const bar = el("div", "bar"), i = el("i"); i.style.width = (r.fraction * 100).toFixed(1) + "%"; i.style.background = r.color; bar.append(i); row.append(bar); }
+    return row;
+  }));
+  $("rows").style.display = d.rows.length ? "" : "none";
+
+  $("legend").replaceChildren(...d.series.map(s => { const sp = el("span"); const i = el("i"); i.style.background = s.color; sp.append(i, s.name); return sp; }));
+  drawChart(d.series);
+
+  $("alertsCard").style.display = d.alerts.length ? "block" : "none";
+  $("alerts").replaceChildren(...d.alerts.map(a => { const row = el("div"); row.append(el("time", null, a.time), el("b", null, a.title + " "), document.createTextNode(a.message)); return row; }));
+}
+
+function drawChart(series) {
+  const cv = $("chart"), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext("2d"); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+  const all = series.flatMap(s => s.values).filter(v => v != null);
+  if (!all.length) return;
+  let lo = Math.min(...all), hi = Math.max(...all);
+  if (hi - lo < 6) { const m = (hi + lo) / 2; lo = m - 3; hi = m + 3; }
+  lo -= (hi - lo) * .1; hi += (hi - lo) * .1;
+  const css = getComputedStyle(document.documentElement);
+  ctx.strokeStyle = css.getPropertyValue("--line"); ctx.fillStyle = css.getPropertyValue("--text3"); ctx.font = "11px system-ui"; ctx.lineWidth = 1;
+  for (let i = 0; i <= 3; i++) {
+    const y = 6 + (h - 12) * i / 3, val = hi - (hi - lo) * i / 3;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w - 34, y); ctx.stroke();
+    ctx.fillText(Math.round(val) + "°", w - 30, y + 4);
+  }
+  for (const s of series) {
+    const n = s.values.length; if (n < 2) continue;
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+    s.values.forEach((v, i) => { if (v == null) return; const x = (w - 38) * i / (n - 1), y = 6 + (h - 12) * (1 - (v - lo) / (hi - lo)); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  }
+}
+
+async function tick() {
+  try {
+    const r = await fetch(`/api/data?t=${encodeURIComponent(token)}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    render(await r.json());
+  } catch (e) {
+    $("status").textContent = "bağlantı yok";
+    $("status").classList.add("off");
+  }
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>

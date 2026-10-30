@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- Sadece NotifyIcon (tepsi ikonu) ve System.Drawing için -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+
+    <!-- LibreHardwareMonitorLib runtime'a özel (win-x64) assembly kullanıyor -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <!-- Linux/macOS CI'da da derlenebilsin -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <AssemblyName>Kor</AssemblyName>
+    <RootNamespace>Kor</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\kor.ico</ApplicationIcon>
+
+    <Version>0.3.0</Version>
+    <Product>Kor</Product>
+    <Company>side project GAMES</Company>
+    <Description>Kor — sıcaklık, fan ve disk izleyici</Description>
+    <SatelliteResourceLanguages>tr;en</SatelliteResourceLanguages>
+    <!-- WFO0003: WinForms'un DPI uyarısı; DPI ayarı WPF için manifest'te bilinçli olarak duruyor -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF + WinForms birlikte olunca isim çakışmalarını önle -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <!-- Oyunlarda FPS: DXGI/D3D9 Present olaylarını ETW ile dinler (PresentMon'un yöntemi) -->
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.8" />
+    <!-- Telefondan izleme bağlantısı için QR kod -->
+    <PackageReference Include="QRCoder" Version="1.8.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\kor.ico" />
+    <Resource Include="Assets\kor.png" />
+    <EmbeddedResource Include="Assets\remote.html" LogicalName="Kor.remote.html" />
+  </ItemGroup>
+
+</Project>
