@@ -1,10 +1,11 @@
-# v* etiketi gönderilince: taşınabilir exe + Inno Setup kurulumu derlenir ve GitHub Release oluşturulur.
-#   git tag v0.3.1 && git push origin v0.3.1
+# GitHub'da bir sürüm (Release) yayımlanınca: taşınabilir exe + Inno Setup kurulumu derlenir
+# ve o sürüme dosya olarak eklenir. Sürüm notunu GitHub arayüzünde ya da şöyle yazabilirsin:
+#   gh release create v0.3.1 --title "Kor v0.3.1" --notes-file release-notes/v0.3.1.md
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -31,7 +32,7 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '${{ github.event.inputs.version }}' }
+          $v = if ('${{ github.event_name }}' -eq 'release') { '${{ github.event.release.tag_name }}'.TrimStart('v') } else { '${{ github.event.inputs.version }}' }
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Taşınabilir exe (self-contained, tek dosya)
@@ -69,18 +70,9 @@ jobs:
           name: kor-${{ steps.ver.outputs.version }}
           path: dist/*
 
-      - name: Sürüm notu yoksa kısa bir tane yaz
-        if: github.ref_type == 'tag'
-        shell: pwsh
-        run: |
-          $notes = "release-notes/$env:GITHUB_REF_NAME.md"
-          if (-not (Test-Path $notes)) { "Kor $env:GITHUB_REF_NAME" | Set-Content $notes -Encoding utf8 }
-
-      - name: GitHub Release
-        if: github.ref_type == 'tag'
+      - name: Dosyaları sürüme ekle
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          name: Kor ${{ github.ref_name }}
-          body_path: release-notes/${{ github.ref_name }}.md
-          generate_release_notes: true
+          tag_name: ${{ github.event.release.tag_name }}
           files: dist/*
