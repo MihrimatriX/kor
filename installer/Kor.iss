@@ -75,8 +75,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "pawnio"; Description: "{cm:PawnIoTask}"; GroupDescription: "{cm:Extras}"; Check: not IsPawnIoInstalled
 
 [InstallDelete]
-; Önceki sürümün kütüphaneleri yenileriyle karışmasın (0.3.0 tek dosyaydı; sonrakiler klasör olarak kurulur)
-Type: files; Name: "{app}\*.dll"
+; Önceki Kor sürümünün kütüphaneleri yenileriyle karışmasın (0.3.0 tek dosyaydı; sonrakiler klasör olarak kurulur).
+; Sadece klasörde zaten Kor varsa: kullanıcının seçtiği başka bir klasördeki dosyalara dokunulmaz.
+Type: files; Name: "{app}\*.dll"; Check: IsExistingKorFolder
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -107,13 +108,22 @@ begin
          or RegKeyExists(HKLM32, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO');
 end;
 
-{ Çalışan Kor'a "düzgün kapan" sinyali gönderir: fan kontrolü BIOS'a döner, ayarlar kaydedilir. }
+function IsExistingKorFolder: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\Kor.exe'));
+end;
+
+{ Çalışan Kor'a "düzgün kapan" sinyali gönderir: fan kontrolü BIOS'a döner, ayarlar kaydedilir.
+  0.3.1+ süreç gerçekten bitene kadar bekler; eski sürümler kilidi biraz erken bıraktığı için kısa bir pay. }
 procedure StopRunningKor(const ExePath: String);
 var
   Code: Integer;
 begin
   if FileExists(ExePath) then
+  begin
     Exec(ExePath, '--exit', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    Sleep(800);
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

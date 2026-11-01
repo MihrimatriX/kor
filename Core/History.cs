@@ -91,7 +91,7 @@ public sealed class SensorHistory
         }
         else
         {
-            var first = _minutes.FirstIndexAtOrAfter(MinuteIndex(from) + (from.Second > 0 || from.Millisecond > 0 ? 1 : 0));
+            var first = _minutes.FirstIndexAtOrAfter(FirstMinuteAtOrAfter(from));
             var result = new List<TimedValue>(_minutes.Count - first + 1);
             for (var i = first; i < _minutes.Count; i++)
                 result.Add(new TimedValue(MinuteTime(_minutes.TimeAt(i)).AddSeconds(30), _minutes.ValueAt(i)));
@@ -102,12 +102,14 @@ public sealed class SensorHistory
 
     public IEnumerable<MinuteValue> Minutes(DateTime from)
     {
-        var start = MinuteIndex(from) + (from.Second > 0 || from.Millisecond > 0 ? 1 : 0);
+        var start = FirstMinuteAtOrAfter(from);
         for (var i = _minutes.FirstIndexAtOrAfter(start); i < _minutes.Count; i++)
             yield return new MinuteValue(MinuteTime(_minutes.TimeAt(i)), _minutes.ValueAt(i));
     }
 
     private static int MinuteIndex(DateTime t) => (int)Math.Floor((t - EpochMinute).TotalMinutes);
+    /// <summary>Başlangıcı <paramref name="t"/> ya da sonrası olan ilk dakika (eski "m.Minute >= from" süzgeci).</summary>
+    private static int FirstMinuteAtOrAfter(DateTime t) => MinuteIndex(t) + (t.Ticks % TimeSpan.TicksPerMinute != 0 ? 1 : 0);
     private static DateTime MinuteTime(int index) => EpochMinute.AddMinutes(index);
 
     /// <summary>

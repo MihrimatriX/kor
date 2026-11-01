@@ -196,25 +196,27 @@ public sealed class EtwFpsMonitor : IFpsSource
     public void SetGameActive(bool active)
     {
         if (_session is null || !IsRunning || active == _providersOn) return;
-        try
+        // Durum önce değişir: bir sağlayıcı açılamazsa her algılama turunda (3 sn) yeniden denenip günlük şişmesin.
+        _providersOn = active;
+        if (active)
         {
-            if (active)
-            {
-                // Sadece "Present" olayı (Windows 8.1+ çekirdek tarafında süzer; eski sürümde seçenek yok sayılır)
-                _session.EnableProvider(DxgiProvider, TraceEventLevel.Informational, ulong.MaxValue, new TraceEventProviderOptions { EventIDsToEnable = [DxgiPresentStart] });
-                _session.EnableProvider(D3D9Provider, TraceEventLevel.Informational, ulong.MaxValue, new TraceEventProviderOptions { EventIDsToEnable = [D3D9PresentStart] });
-            }
-            else
-            {
-                _session.DisableProvider(DxgiProvider);
-                _session.DisableProvider(D3D9Provider);
-                lock (_gate) _presents.Clear();
-            }
-            _providersOn = active;
+            // Önceki oyundan sonra yolda kalıp gelen olayları at
+            lock (_gate) _presents.Clear();
+            // Sadece "Present" olayı (Windows 8.1+ çekirdek tarafında süzer; eski sürümde seçenek yok sayılır)
+            Try(() => _session.EnableProvider(DxgiProvider, TraceEventLevel.Informational, ulong.MaxValue, new TraceEventProviderOptions { EventIDsToEnable = [DxgiPresentStart] }), "DXGI FPS sağlayıcısı açılamadı");
+            Try(() => _session.EnableProvider(D3D9Provider, TraceEventLevel.Informational, ulong.MaxValue, new TraceEventProviderOptions { EventIDsToEnable = [D3D9PresentStart] }), "D3D9 FPS sağlayıcısı açılamadı");
         }
-        catch (Exception ex)
+        else
         {
-            Log.Write(active ? "FPS sağlayıcıları açılamadı" : "FPS sağlayıcıları kapatılamadı", ex);
+            Try(() => _session.DisableProvider(DxgiProvider), "DXGI FPS sağlayıcısı kapatılamadı");
+            Try(() => _session.DisableProvider(D3D9Provider), "D3D9 FPS sağlayıcısı kapatılamadı");
+            lock (_gate) _presents.Clear();
+        }
+
+        static void Try(Action action, string error)
+        {
+            try { action(); }
+            catch (Exception ex) { Log.Write(error, ex); }
         }
     }
 
@@ -243,6 +245,12 @@ public sealed class EtwFpsMonitor : IFpsSource
         var now = Environment.TickCount64;
         lock (_gate)
         {
+            // Kapanan ya da kare üretmeyi bırakan süreçlerin kayıtlarını temizle
+            List<int>? dead = null;
+            foreach (var (key, value) in _presents)
+                if (now - value.LastArrival > 10_000) (dead ??= []).Add(key);
+            if (dead is not null) foreach (var key in dead) _presents.Remove(key);
+
             // Önce oyunun kendi süreci; çizimi ayrı bir alt süreç yapıyorsa ön plandaki pencere
             if (!_presents.TryGetValue(pid, out var log) || log.Times.Count < 2)
             {
@@ -252,12 +260,6 @@ public sealed class EtwFpsMonitor : IFpsSource
             // Artık kare üretmiyor (gerçek zamanlı ETW ~1 sn gecikmeli gelir, payı ona göre)
             if (now - log.LastArrival > 2500) return null;
             times = log.Times.ToArray();
-
-            // Ölü süreçlerin kayıtlarını temizle
-            List<int>? dead = null;
-            foreach (var (key, value) in _presents)
-                if (now - value.LastArrival > 10_000) (dead ??= []).Add(key);
-            if (dead is not null) foreach (var key in dead) _presents.Remove(key);
         }
 
         return Compute(NameOf(pid, game), times);

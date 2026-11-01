@@ -228,11 +228,14 @@ public sealed class SensorService : ISensorSource
 
     private readonly Dictionary<string, (DiskHealthInfo? Info, long At)> _health = [];
 
-    /// <summary>SMART özeti dakikalar içinde değişmez: 30 sn'de bir okunur, arada son değer kullanılır.</summary>
+    /// <summary>
+    /// SMART özeti dakikalar içinde değişmez: 30 sn'de bir okunur, arada son değer kullanılır.
+    /// Okunamadıysa (henüz hazır değil / geçici hata) 5 sn sonra yeniden denenir.
+    /// </summary>
     private DiskHealthInfo? CachedHealth(IHardware hw, string id)
     {
         var now = Environment.TickCount64;
-        if (_health.TryGetValue(id, out var cached) && now - cached.At < 30_000) return cached.Info;
+        if (_health.TryGetValue(id, out var cached) && now - cached.At < (cached.Info is null ? 5_000 : 30_000)) return cached.Info;
         var info = ReadHealth(hw);
         _health[id] = (info, now);
         return info;
