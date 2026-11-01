@@ -89,10 +89,12 @@ public sealed class FanController
 
     private readonly Dictionary<string, float> _applied = [];
     private readonly HashSet<string> _failed = [];
+    private readonly HashSet<string> _active = []; // her turda yeniden kullanılır
 
     public void Apply(IReadOnlyList<FanControlRule> plan, Func<string, float?> readValue, Func<string, IFanControl?> findControl)
     {
-        var active = new HashSet<string>();
+        var active = _active;
+        active.Clear();
 
         foreach (var rule in plan)
         {
@@ -129,7 +131,11 @@ public sealed class FanController
         }
 
         // Kuralı kalkan kontrolleri varsayılana döndür.
-        foreach (var id in _applied.Keys.Where(k => !active.Contains(k)).ToList())
+        List<string>? stale = null;
+        foreach (var id in _applied.Keys)
+            if (!active.Contains(id)) (stale ??= []).Add(id);
+        if (stale is null) return;
+        foreach (var id in stale)
         {
             Restore(id, findControl);
             _applied.Remove(id);

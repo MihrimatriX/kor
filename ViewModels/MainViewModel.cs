@@ -8,6 +8,7 @@ using Kor.Controls;
 using Kor.Core;
 using Kor.Infrastructure;
 using LibreHardwareMonitor.Hardware;
+using static Kor.Infrastructure.Paint;
 
 namespace Kor.ViewModels;
 
@@ -174,8 +175,18 @@ public sealed partial class MainViewModel : ObservableObject
         _ => TimeSpan.FromHours(1),
     };
 
-    /// <summary>Detay penceresi açıkken true; kapalıyken grafik verisi hazırlanmaz.</summary>
-    public bool ChartsActive { get; set; }
+    private bool _chartsActive;
+    /// <summary>Detay penceresi ekranda (açık ve simge durumunda değil) iken true; değilse grafik verisi hazırlanmaz.</summary>
+    public bool ChartsActive
+    {
+        get => _chartsActive;
+        set
+        {
+            if (_chartsActive == value) return;
+            _chartsActive = value;
+            if (value) UpdateCharts(); // gizliyken bekleyen grafiği hemen tazele
+        }
+    }
 
     // ---- Fan kontrolü ----
     public ObservableCollection<FanControlItem> FanControls { get; } = [];
@@ -224,7 +235,16 @@ public sealed partial class MainViewModel : ObservableObject
     public int SensorCount { get => _sensorCount; private set => Set(ref _sensorCount, value); }
 
     private Page _currentPage = Page.Overview;
-    public Page CurrentPage { get => _currentPage; set { if (Set(ref _currentPage, value)) OnPropertyChanged(nameof(PageTitle)); } }
+    public Page CurrentPage
+    {
+        get => _currentPage;
+        set
+        {
+            if (!Set(ref _currentPage, value)) return;
+            OnPropertyChanged(nameof(PageTitle));
+            UpdateCharts(); // grafikler sadece görünen sayfa için hazırlanıyor
+        }
+    }
 
     public string PageTitle => _currentPage switch
     {
@@ -274,7 +294,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public void Apply(HardwareSnapshot snapshot)
     {
-        var completed = new List<(string Id, float Avg)>();
+        List<(string Id, float Avg)>? completed = null; // dakikada bir dolar
         DateTime? completedMinute = null;
 
         foreach (var hw in snapshot.Hardware)
@@ -288,13 +308,13 @@ public sealed partial class MainViewModel : ObservableObject
                 }
                 if (item.Apply(s, snapshot.Timestamp) is { } minute)
                 {
-                    completed.Add((s.Id, minute.Avg));
+                    (completed ??= new(_items.Count)).Add((s.Id, minute.Avg));
                     completedMinute = minute.Minute;
                 }
             }
         }
 
-        if (completedMinute is { } m && Settings.HistoryEnabled) _recorder?.Append(m, completed);
+        if (completedMinute is { } m && completed is not null && Settings.HistoryEnabled) _recorder?.Append(m, completed);
 
         _snapshot = snapshot;
         if (snapshot.Signature != _signature)
@@ -313,7 +333,10 @@ public sealed partial class MainViewModel : ObservableObject
 
         UpdateDiskHealth(snapshot);
         RebuildWidgetsIfNeeded();
-        foreach (var w in Widgets) w.Refresh();
+        foreach (var w in Widgets)
+        {
+            if (w.Config.Visible) w.Refresh(); // gizli widget'ın penceresi yok
+        }
         foreach (var fc in FanControls) fc.Tick();
 
         CheckAlerts();
@@ -322,8 +345,8 @@ public sealed partial class MainViewModel : ObservableObject
         LastUpdateText = $"Son ölçüm {snapshot.Timestamp:HH:mm:ss}";
         UpdateSession();
         UpdateGameText();
-        if (ChartsActive) UpdateCharts();
-        UpdateRemoteJson();
+        UpdateCharts();
+        if (RemoteWatched) UpdateRemoteJson();
 
         Updated?.Invoke();
     }
@@ -521,40 +544,49 @@ public sealed partial class MainViewModel : ObservableObject
     //  Grafikler ve oturum
     // =====================================================================
 
+    /// <summary>Sadece ekranda görünen grafiğin verisini hazırlar (genel bakış ya da seçili sensör).</summary>
     private void UpdateCharts()
     {
-        if (!ChartsActive) return;
+        if (!_chartsActive) return;
         var now = DateTime.Now;
         var span = ChartSpan;
 
-        if (_selectedSensor is { } s)
+        if (_currentPage == Page.Sensors && _selectedSensor is { } s)
         {
             var points = s.History.GetPoints(span, now);
             var color = s.IsTemperature ? CpuLine : s.Accent;
             SelectedSeries = [new ChartSeries(s.Name, color, points, s.FormatValue)];
             if (points.Count > 0)
             {
-                StatMin = s.FormatValue(points.Min(p => p.Value));
-                StatAvg = s.FormatValue(points.Average(p => p.Value));
-                StatMax = s.FormatValue(points.Max(p => p.Value));
+                double min = double.MaxValue, max = double.MinValue, sum = 0;
+                foreach (var p in points)
+                {
+                    min = Math.Min(min, p.Value);
+                    max = Math.Max(max, p.Value);
+                    sum += p.Value;
+                }
+                StatMin = s.FormatValue(min);
+                StatAvg = s.FormatValue(sum / points.Count);
+                StatMax = s.FormatValue(max);
             }
             else
             {
                 StatMin = StatAvg = StatMax = "—";
             }
-            StatSession = s.SessionMax is float max ? s.FormatValue(max) : "—";
+            StatSession = s.SessionMax is float sessionMax ? s.FormatValue(sessionMax) : "—";
             SelectedThreshold = RuleFor(s.Id) is { } rule
                 ? rule.Threshold
                 : s.IsTemperature && s.Kind is HwKind.Cpu or HwKind.Gpu or HwKind.Storage
                     ? TempScale.Thresholds(s.Kind, Settings).Warn
                     : double.NaN;
         }
-        else
+        else if (_selectedSensor is null && SelectedSeries.Count > 0)
         {
             SelectedSeries = [];
         }
 
-        var series = new List<ChartSeries>();
+        if (_currentPage != Page.Overview) return;
+        var series = new List<ChartSeries>(3);
         void AddLine(string name, Brush brush, SensorItem? item)
         {
             if (item is not null) series.Add(new ChartSeries(name, brush, item.History.GetPoints(span, now), item.FormatValue));
@@ -726,11 +758,12 @@ public sealed partial class MainViewModel : ObservableObject
             case nameof(AppSettings.HideIdleFans):
             case AppSettings.WidgetItemChanged:
             case nameof(AppSettings.Widgets):
-                RebuildWidgetsIfNeeded();
+                RebuildWidgetsIfNeeded(force: true);
                 Updated?.Invoke();
                 break;
 
             case nameof(AppSettings.AlertRules):
+                _ruledIds = null;
                 RefreshAlertEditor();
                 UpdateCharts();
                 break;
@@ -894,10 +927,4 @@ public sealed partial class MainViewModel : ObservableObject
         return new HardwareCard(titleOverride ?? hw.Name, Formatting.KindTitle(hw.Kind), hw.Kind, primary, stats);
     }
 
-    private static Brush Frozen(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
 }

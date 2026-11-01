@@ -219,11 +219,23 @@ public sealed class SensorService : ISensorSource
 
             var hwId = hw.Identifier.ToString();
             hash.Add(hwId);
-            var health = hw.HardwareType == HardwareType.Storage ? ReadHealth(hw) : null;
+            var health = hw.HardwareType == HardwareType.Storage ? CachedHealth(hw, hwId) : null;
             list.Add(new HardwareSample(hwId, hw.Name.Trim(), MapKind(hw.HardwareType), hw.HardwareType, parent?.Name.Trim(), sensors, health));
 
             foreach (var sub in hw.SubHardware) Add(sub, hw);
         }
+    }
+
+    private readonly Dictionary<string, (DiskHealthInfo? Info, long At)> _health = [];
+
+    /// <summary>SMART özeti dakikalar içinde değişmez: 30 sn'de bir okunur, arada son değer kullanılır.</summary>
+    private DiskHealthInfo? CachedHealth(IHardware hw, string id)
+    {
+        var now = Environment.TickCount64;
+        if (_health.TryGetValue(id, out var cached) && now - cached.At < 30_000) return cached.Info;
+        var info = ReadHealth(hw);
+        _health[id] = (info, now);
+        return info;
     }
 
     /// <summary>LibreHardwareMonitor'un disk nesnesindeki SMART özetini okur (DiskInfoToolkit).</summary>

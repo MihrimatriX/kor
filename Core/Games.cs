@@ -19,6 +19,9 @@ public interface IFpsSource : IDisposable
     string Status { get; }
     bool IsRunning { get; }
     FpsReading? Read(GameInfo? game);
+
+    /// <summary>Oyun başlayınca/bitince çağrılır; oyun yokken ölçüm kaynağı boşta bekleyebilir.</summary>
+    void SetGameActive(bool active) { }
 }
 
 /// <summary>
@@ -34,18 +37,20 @@ public static partial class GameDetector
         "startmenuexperiencehost", "lockapp", "searchapp", "dwm", "taskmgr",
     };
 
-    public static GameInfo? Detect(IReadOnlyCollection<string> games, bool autoFullscreen)
+    /// <param name="games">Büyük/küçük harf duyarsız (OrdinalIgnoreCase) süreç adı kümesi.</param>
+    public static GameInfo? Detect(IReadOnlySet<string> games, bool autoFullscreen)
     {
         if (games.Count > 0)
         {
+            // Tek sistem çağrısıyla tüm süreçlerin anlık görüntüsü; ad karşılaştırması ek çağrı yapmaz.
+            GameInfo? found = null;
             foreach (var p in Process.GetProcesses())
             {
-                using (p)
-                {
-                    if (games.Contains(p.ProcessName.ToLowerInvariant()))
-                        return new GameInfo(p.ProcessName, p.Id, FromList: true);
-                }
+                if (found is null && games.Contains(p.ProcessName))
+                    found = new GameInfo(p.ProcessName, p.Id, FromList: true);
+                p.Dispose();
             }
+            if (found is not null) return found;
         }
 
         return autoFullscreen ? FullscreenForeground() : null;
@@ -140,9 +145,17 @@ public sealed class EtwFpsMonitor : IFpsSource
     private const int D3D9PresentStart = 1;
 
     private readonly Lock _gate = new();
-    private readonly Dictionary<int, Queue<double>> _presents = [];
-    private TraceEventSession? _session;
-    private Thread? _thread;
+    private readonly Dictionary<int, PresentLog> _presents = [];
+    private readonly TraceEventSession? _session;
+    private bool _providersOn;
+    private (int Pid, string Name) _nameCache = (0, "");
+
+    /// <summary>Bir sürecin son 5 sn'deki Present zamanları (ETW saatiyle, ms) ve son olayın geliş anı.</summary>
+    private sealed class PresentLog
+    {
+        public readonly Queue<double> Times = new();
+        public long LastArrival;
+    }
 
     public string Status { get; private set; } = "Başlatılmadı";
     public bool IsRunning { get; private set; }
@@ -157,17 +170,17 @@ public sealed class EtwFpsMonitor : IFpsSource
 
         try
         {
+            // Oturum açık durur ama sağlayıcılar sadece oyun varken etkin (SetGameActive):
+            // oyun yokken tarayıcı, Discord, masaüstü gibi her DXGI programının olayları hiç üretilmez.
             _session = new TraceEventSession("Kor-FPS") { StopOnDispose = true };
-            _session.EnableProvider(DxgiProvider, TraceEventLevel.Informational);
-            _session.EnableProvider(D3D9Provider, TraceEventLevel.Informational);
             _session.Source.AllEvents += OnEvent;
-            _thread = new Thread(() =>
+            var thread = new Thread(() =>
             {
                 try { _session.Source.Process(); }
                 catch (Exception ex) { Log.Write("FPS oturumu durdu", ex); IsRunning = false; Status = "Durdu"; }
             })
             { IsBackground = true, Name = "Kor.Fps" };
-            _thread.Start();
+            thread.Start();
             IsRunning = true;
             Status = "Çalışıyor";
         }
@@ -180,17 +193,44 @@ public sealed class EtwFpsMonitor : IFpsSource
         }
     }
 
+    public void SetGameActive(bool active)
+    {
+        if (_session is null || !IsRunning || active == _providersOn) return;
+        try
+        {
+            if (active)
+            {
+                // Sadece "Present" olayı (Windows 8.1+ çekirdek tarafında süzer; eski sürümde seçenek yok sayılır)
+                _session.EnableProvider(DxgiProvider, TraceEventLevel.Informational, ulong.MaxValue, new TraceEventProviderOptions { EventIDsToEnable = [DxgiPresentStart] });
+                _session.EnableProvider(D3D9Provider, TraceEventLevel.Informational, ulong.MaxValue, new TraceEventProviderOptions { EventIDsToEnable = [D3D9PresentStart] });
+            }
+            else
+            {
+                _session.DisableProvider(DxgiProvider);
+                _session.DisableProvider(D3D9Provider);
+                lock (_gate) _presents.Clear();
+            }
+            _providersOn = active;
+        }
+        catch (Exception ex)
+        {
+            Log.Write(active ? "FPS sağlayıcıları açılamadı" : "FPS sağlayıcıları kapatılamadı", ex);
+        }
+    }
+
     private void OnEvent(TraceEvent e)
     {
         var id = (int)e.ID;
-        if (!((e.ProviderGuid == DxgiProvider && id == DxgiPresentStart) || (e.ProviderGuid == D3D9Provider && id == D3D9PresentStart))) return;
+        if (!((id == DxgiPresentStart && e.ProviderGuid == DxgiProvider) || (id == D3D9PresentStart && e.ProviderGuid == D3D9Provider))) return;
 
-        var t = e.TimeStamp.Ticks / (double)TimeSpan.TicksPerMillisecond;
+        var t = e.TimeStampRelativeMSec;
+        var arrival = Environment.TickCount64;
         lock (_gate)
         {
-            if (!_presents.TryGetValue(e.ProcessID, out var q)) _presents[e.ProcessID] = q = new Queue<double>();
-            q.Enqueue(t);
-            while (q.Count > 0 && t - q.Peek() > 5000) q.Dequeue();
+            if (!_presents.TryGetValue(e.ProcessID, out var log)) _presents[e.ProcessID] = log = new PresentLog();
+            log.Times.Enqueue(t);
+            log.LastArrival = arrival;
+            while (log.Times.Count > 0 && t - log.Times.Peek() > 5000) log.Times.Dequeue();
         }
     }
 
@@ -200,30 +240,42 @@ public sealed class EtwFpsMonitor : IFpsSource
         if (!IsRunning || game is null) return null;
         var pid = game.ProcessId;
         double[] times;
+        var now = Environment.TickCount64;
         lock (_gate)
         {
             // Önce oyunun kendi süreci; çizimi ayrı bir alt süreç yapıyorsa ön plandaki pencere
-            if (!_presents.TryGetValue(pid, out var q) || q.Count < 2)
+            if (!_presents.TryGetValue(pid, out var log) || log.Times.Count < 2)
             {
                 pid = GameDetector.ForegroundProcessId();
-                if (!_presents.TryGetValue(pid, out q) || q.Count < 2) return null;
+                if (!_presents.TryGetValue(pid, out log) || log.Times.Count < 2) return null;
             }
-            times = q.ToArray();
+            // Artık kare üretmiyor (gerçek zamanlı ETW ~1 sn gecikmeli gelir, payı ona göre)
+            if (now - log.LastArrival > 2500) return null;
+            times = log.Times.ToArray();
 
-            // Ölü süreçlerin kuyruklarını temizle
-            var now = DateTime.Now.Ticks / (double)TimeSpan.TicksPerMillisecond;
-            foreach (var key in _presents.Where(kv => kv.Value.Count == 0 || now - kv.Value.Last() > 10_000).Select(kv => kv.Key).ToList())
-                _presents.Remove(key);
+            // Ölü süreçlerin kayıtlarını temizle
+            List<int>? dead = null;
+            foreach (var (key, value) in _presents)
+                if (now - value.LastArrival > 10_000) (dead ??= []).Add(key);
+            if (dead is not null) foreach (var key in dead) _presents.Remove(key);
         }
 
-        var nowMs = DateTime.Now.Ticks / (double)TimeSpan.TicksPerMillisecond;
-        if (nowMs - times[^1] > 2500) return null; // artık kare üretmiyor
+        return Compute(NameOf(pid, game), times);
+    }
 
+    /// <summary>
+    /// Süreç adı. Process.ProcessName tüm süreçlerin listesini çeker; saniyede bir bunu yapmamak için
+    /// oyunun kendi sürecinde algılamadaki adı, alt süreçte ise önbelleği kullanır.
+    /// </summary>
+    private string NameOf(int pid, GameInfo game)
+    {
+        if (pid == game.ProcessId) return game.ProcessName;
+        if (_nameCache.Pid == pid) return _nameCache.Name;
         string name;
         try { using var p = Process.GetProcessById(pid); name = p.ProcessName; }
-        catch { name = game?.ProcessName ?? "?"; }
-
-        return Compute(name, times);
+        catch { name = game.ProcessName; }
+        _nameCache = (pid, name);
+        return name;
     }
 
     /// <summary>Son 1 sn'deki kare sayısı = FPS; son 5 sn'deki en yavaş %1 kare = "1% düşük".</summary>

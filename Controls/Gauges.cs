@@ -2,8 +2,40 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using Kor.Core;
+using Kor.Infrastructure;
 
 namespace Kor.Controls;
+
+/// <summary>
+/// Gösterge animasyonları için ortak kurallar. Widget katmanlı (saydam) bir pencere olduğu için
+/// her animasyon karesi tüm pencerenin yeniden çizilip ekrana kopyalanması demek; o yüzden:
+///  • Gözle fark edilmeyecek kadar küçük değişimler animasyonsuz uygulanır,
+///  • Kare hızı 30 ile sınırlı,
+///  • Windows'ta "Animasyon efektleri" kapalıysa hiç animasyon yapılmaz.
+/// Unity karşılığı: her Update'te lerp yerine sadece hedef değişince kısa bir tween başlatmak.
+/// </summary>
+internal static class GaugeMotion
+{
+    /// <summary>0..1 ölçeğinde bu kadarlık değişim ekranda ~1 pikselin altında kalır.</summary>
+    private const double MinAnimatedDelta = 0.006;
+
+    public static void To(UIElement element, DependencyProperty property, double target, int durationMs)
+    {
+        var current = (double)element.GetValue(property);
+        if (!element.IsVisible || !SystemParameters.ClientAreaAnimation || Math.Abs(target - current) < MinAnimatedDelta)
+        {
+            element.BeginAnimation(property, null);
+            element.SetValue(property, target);
+            return;
+        }
+
+        var anim = new DoubleAnimation(target, TimeSpan.FromMilliseconds(durationMs)) { EasingFunction = Ease };
+        Timeline.SetDesiredFrameRate(anim, 30);
+        element.BeginAnimation(property, anim);
+    }
+
+    private static readonly IEasingFunction Ease = Paint.Frozen(new CubicEase { EasingMode = EasingMode.EaseOut });
+}
 
 /// <summary>
 /// 270°'lik halka gösterge (alt kısmı açık). Değer değişince kısa bir animasyonla ilerler.
@@ -41,22 +73,14 @@ public sealed class RingGauge : FrameworkElement
     public double Thickness { get => (double)GetValue(ThicknessProperty); set => SetValue(ThicknessProperty, value); }
 
     private static void OnValueChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        var gauge = (RingGauge)d;
-        var target = Math.Clamp((double)e.NewValue, 0, 1);
-        if (!gauge.IsLoaded)
-        {
-            gauge.SetValue(DisplayValueProperty, target);
-            return;
-        }
+        => GaugeMotion.To((RingGauge)d, DisplayValueProperty, Math.Clamp((double)e.NewValue, 0, 1), 380);
 
-        var anim = new DoubleAnimation(target, TimeSpan.FromMilliseconds(420))
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-        };
-        Timeline.SetDesiredFrameRate(anim, 40); // katmanlı pencerede CPU'yu yormasın
-        gauge.BeginAnimation(DisplayValueProperty, anim);
-    }
+    // Animasyon karelerinde değişmeyen parçalar önbellekte: iz halkası, kalemler, parıltı fırçası.
+    private (double W, double H, double T, Brush? Track) _trackKey;
+    private Geometry? _trackArc;
+    private Pen? _trackPen;
+    private (Brush? Stroke, double T) _penKey;
+    private Pen? _glowPen, _strokePen;
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -67,21 +91,36 @@ public sealed class RingGauge : FrameworkElement
         var radius = size / 2 - t / 2 - 1;
         var center = new Point(ActualWidth / 2, ActualHeight / 2);
 
-        var trackPen = new Pen(TrackBrush, t) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-        dc.DrawGeometry(null, trackPen, Arc(center, radius, StartAngle, SweepAngle));
+        var trackKey = (ActualWidth, ActualHeight, t, TrackBrush);
+        if (_trackArc is null || _trackKey != trackKey)
+        {
+            _trackKey = trackKey;
+            _trackArc = Arc(center, radius, StartAngle, SweepAngle);
+            _trackPen = RoundPen(TrackBrush, t);
+        }
+        dc.DrawGeometry(null, _trackPen, _trackArc);
 
         var value = (double)GetValue(DisplayValueProperty);
         if (value < 0.004) return;
 
+        var stroke = Stroke;
+        if (_strokePen is null || _penKey != (stroke, t))
+        {
+            _penKey = (stroke, t);
+            // Yumuşak parıltı: geniş ve saydam bir alt çizgi
+            var glow = stroke.CloneCurrentValue();
+            glow.Opacity = 0.18;
+            _glowPen = RoundPen(glow, t * 2.1);
+            _strokePen = RoundPen(stroke, t);
+        }
+
         var arc = Arc(center, radius, StartAngle, SweepAngle * value);
-
-        // Yumuşak parıltı: geniş ve saydam bir alt çizgi
-        var glowBrush = Stroke.CloneCurrentValue();
-        glowBrush.Opacity = 0.18;
-        dc.DrawGeometry(null, new Pen(glowBrush, t * 2.1) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, arc);
-
-        dc.DrawGeometry(null, new Pen(Stroke, t) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, arc);
+        dc.DrawGeometry(null, _glowPen, arc);
+        dc.DrawGeometry(null, _strokePen, arc);
     }
+
+    private static Pen RoundPen(Brush brush, double thickness)
+        => Paint.Frozen(new Pen(brush, thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
 
     private static StreamGeometry Arc(Point c, double r, double startDeg, double sweepDeg)
     {
@@ -125,18 +164,7 @@ public sealed class BarMeter : FrameworkElement
     public Brush TrackBrush { get => (Brush)GetValue(TrackBrushProperty); set => SetValue(TrackBrushProperty, value); }
 
     private static void OnValueChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        var bar = (BarMeter)d;
-        var target = Math.Clamp((double)e.NewValue, 0, 1);
-        if (!bar.IsLoaded)
-        {
-            bar.SetValue(DisplayValueProperty, target);
-            return;
-        }
-        var anim = new DoubleAnimation(target, TimeSpan.FromMilliseconds(380)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
-        Timeline.SetDesiredFrameRate(anim, 40);
-        bar.BeginAnimation(DisplayValueProperty, anim);
-    }
+        => GaugeMotion.To((BarMeter)d, DisplayValueProperty, Math.Clamp((double)e.NewValue, 0, 1), 340);
 
     protected override Size MeasureOverride(Size availableSize) => new(0, double.IsNaN(Height) ? 4 : Height);
 
@@ -227,13 +255,22 @@ public sealed class Sparkline : FrameworkElement
         line.Freeze();
         area.Freeze();
 
-        var color = Stroke is SolidColorBrush sb ? sb.Color : Colors.DeepSkyBlue;
-        var fill = new LinearGradientBrush(Color.FromArgb(0x40, color.R, color.G, color.B), Color.FromArgb(0x00, color.R, color.G, color.B), 90);
-        fill.Freeze();
+        // Fırça ve kalem renk değişmedikçe aynı kalır (her saniye yeniden oluşturulmasın)
+        if (_paintFor != Stroke || _fill is null)
+        {
+            _paintFor = Stroke;
+            var color = Stroke is SolidColorBrush sb ? sb.Color : Colors.DeepSkyBlue;
+            _fill = Paint.Frozen(new LinearGradientBrush(Color.FromArgb(0x40, color.R, color.G, color.B), Color.FromArgb(0x00, color.R, color.G, color.B), 90));
+            _pen = Paint.Frozen(new Pen(Stroke, 1.4) { LineJoin = PenLineJoin.Round });
+        }
 
-        dc.DrawGeometry(fill, null, area);
-        dc.DrawGeometry(null, new Pen(Stroke, 1.4) { LineJoin = PenLineJoin.Round }, line);
+        dc.DrawGeometry(_fill, null, area);
+        dc.DrawGeometry(null, _pen, line);
     }
+
+    private Brush? _paintFor;
+    private Brush? _fill;
+    private Pen? _pen;
 }
 
 /// <summary>

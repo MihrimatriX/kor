@@ -2,6 +2,7 @@ using System.Windows.Media;
 using Kor.Core;
 using Kor.Infrastructure;
 using LibreHardwareMonitor.Hardware;
+using static Kor.Infrastructure.Paint;
 
 namespace Kor.ViewModels;
 
@@ -108,13 +109,18 @@ public sealed class SensorItem : ObservableObject
     /// <returns>Bu ölçümle bir dakika tamamlandıysa o dakikanın özeti.</returns>
     public MinuteValue? Apply(SensorSample sample, DateTime time)
     {
+        // Değer, min ve max aynıysa metinler ve renkler de aynı: biçimlendirmeyi atla
+        // (saat hızı, veri miktarı, boşta fanlar gibi sensörlerin çoğu çoğu turda değişmez).
+        var changed = !_formatted || sample.Value != _last.Value || sample.Min != _last.Min || sample.Max != _last.Max || sample.Unit != _last.Unit;
         _last = sample;
         MinuteValue? minute = null;
         if (sample.Value is float v && float.IsFinite(v)) minute = History.Add(time, v);
-        Refresh();
+        if (changed) Refresh();
         Revision++;
         return minute;
     }
+
+    private bool _formatted;
 
     /// <summary>Ham değeri (°C, RPM, B/s...) bu sensörün biçimiyle metne çevirir.</summary>
     public string FormatValue(double raw) => _last.Unit is { } unit
@@ -127,6 +133,7 @@ public sealed class SensorItem : ObservableObject
     /// <summary>Birim/eşik ayarı değişince metinleri ve renkleri yeniden hesaplar.</summary>
     public void Refresh()
     {
+        _formatted = true;
         var s = _last;
         var f = _settings.UseFahrenheit;
 
@@ -185,12 +192,6 @@ public sealed class SensorItem : ObservableObject
         _ => NeutralBrush,
     };
 
-    private static SolidColorBrush Frozen(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
 
     public override string ToString() => $"{HardwareName} / {Name} = {Display}";
 }

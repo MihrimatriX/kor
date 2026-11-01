@@ -34,6 +34,8 @@ public sealed partial class MainViewModel
     }
 
     private readonly Dictionary<string, AlertState> _alertStates = [];
+    /// <summary>Özel eşiği olan sensörler (kurallar değişince sıfırlanır).</summary>
+    private HashSet<string>? _ruledIds;
     private bool _refreshingAlertEditor;
     private readonly Dictionary<string, DiskHealthStatus> _healthSeen = [];
 
@@ -107,7 +109,7 @@ public sealed partial class MainViewModel
         if (!Settings.AlertsEnabled) return;
 
         var rules = Settings.AlertRules;
-        var ruled = rules.Select(r => r.SensorId).ToHashSet();
+        var ruled = _ruledIds ??= rules.Select(r => r.SensorId).ToHashSet();
 
         // 1) Ana sıcaklıklar (özel eşik konduysa o geçerli)
         foreach (var (temp, hwName) in _alertTargets)

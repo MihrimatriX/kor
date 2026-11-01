@@ -1,6 +1,7 @@
 using System.Windows.Media;
 using Kor.Core;
 using Kor.Infrastructure;
+using static Kor.Infrastructure.Paint;
 
 namespace Kor.ViewModels;
 
@@ -114,10 +115,4 @@ public sealed class WidgetRow(WidgetRowKind kind, string label, SensorItem prima
         }
     }
 
-    private static Brush Frozen(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
 }

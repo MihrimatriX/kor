@@ -1,12 +1,14 @@
 ; Kor kurulum betiği (Inno Setup 6.7+)
-; Derleme:  ISCC.exe /DAppVersion=0.3.0 /DSourceExe=..\artifacts\portable\Kor.exe installer\Kor.iss
+; Önce:     dotnet publish Kor.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -o artifacts/app
+; Derleme:  ISCC.exe /DAppVersion=0.3.1 installer\Kor.iss
 ; CI'da .github/workflows/release.yml bu betiği çalıştırır.
 
 #ifndef AppVersion
-  #define AppVersion "0.3.0"
+  #define AppVersion "0.3.1"
 #endif
-#ifndef SourceExe
-  #define SourceExe "..\artifacts\portable\Kor.exe"
+; Yayımlanmış uygulama klasörü (tek dosya değil: kurulu sürüm daha hızlı açılır, daha az bellek kullanır)
+#ifndef SourceDir
+  #define SourceDir "..\artifacts\app"
 #endif
 
 #define AppName "Kor"
@@ -72,8 +74,12 @@ english.Extras=Extras:
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "pawnio"; Description: "{cm:PawnIoTask}"; GroupDescription: "{cm:Extras}"; Check: not IsPawnIoInstalled
 
+[InstallDelete]
+; Önceki sürümün kütüphaneleri yenileriyle karışmasın (0.3.0 tek dosyaydı; sonrakiler klasör olarak kurulur)
+Type: files; Name: "{app}\*.dll"
+
 [Files]
-Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "Kor.exe"; Flags: ignoreversion
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows.Media;
 using Kor.Core;
 using Kor.Infrastructure;
+using static Kor.Infrastructure.Paint;
 
 namespace Kor.ViewModels;
 
@@ -115,10 +116,4 @@ public sealed class DiskHealthItem(string hardwareId, string name, SensorItem? t
     private double? _lastLife;
     private bool HasLifeSensorChanged() => _info?.Life is null && lifeSensor?.Value != _lastLife;
 
-    private static Brush Frozen(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
 }

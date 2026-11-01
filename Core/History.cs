@@ -10,61 +10,54 @@ public enum ChartRange { FiveMinutes, Hour, Day }
 /// <summary>Zaman damgalı tek değer.</summary>
 public readonly record struct TimedValue(DateTime Time, float Value);
 
-/// <summary>Dakikalık özet (24 saatlik grafik ve diske kayıt için).</summary>
-public readonly record struct MinuteValue(DateTime Minute, float Avg, float Max);
+/// <summary>Dakikalık ortalama (24 saatlik grafik ve diske kayıt için).</summary>
+public readonly record struct MinuteValue(DateTime Minute, float Avg);
 
 /// <summary>
 /// Bir sensörün geçmişi:
-///  • Son 1 saat, her ölçüm (saniye çözünürlüğü) — 3600 kayıt
-///  • Son 24 saat, dakikalık ortalama/maksimum — 1440 kayıt
-/// Bellekte sabit boyutlu halka tamponlar; sensör başına ~50 KB.
+///  • Son 1 saat, her ölçüm (saniye çözünürlüğü): en fazla 3600 kayıt
+///  • Son 24 saat, dakikalık ortalama: en fazla 1440 kayıt
+/// Zamanlar epoch'tan saniye/dakika (int) olarak tutulur: kayıt başına 8 bayt, dolu bir sensör ~40 KB.
+/// Tamponlar veri geldikçe büyür; hiç değer okunmayan sensörler bellek harcamaz.
 /// </summary>
 public sealed class SensorHistory
 {
+    private const int SecondCapacity = 3600;
+    private const int MinuteCapacity = 1440;
+
     private static readonly DateTime Epoch = DateTime.Now;
+    private static readonly DateTime EpochMinute = Epoch.AddTicks(-(Epoch.Ticks % TimeSpan.TicksPerMinute));
 
-    // Saniyelik: zamanı epoch'tan saniye (int) olarak tutarak kayıt başına 8 bayt.
-    private readonly int[] _secTimes = new int[3600];
-    private readonly float[] _secValues = new float[3600];
-    private int _secStart, _secCount;
+    private readonly Ring _seconds = new(SecondCapacity);
+    private readonly Ring _minutes = new(MinuteCapacity);
 
-    private readonly MinuteValue[] _minutes = new MinuteValue[1440];
-    private int _minStart, _minCount;
-
-    private DateTime _curMinute;
+    private int _curMinute = int.MinValue;
     private double _sum;
     private int _n;
-    private float _max = float.MinValue;
 
-    public int Count => _secCount;
+    public int Count => _seconds.Count;
 
     /// <summary>En eskiden en yeniye i'inci saniyelik değer.</summary>
-    public float this[int i] => _secValues[(_secStart + i) % _secValues.Length];
+    public float this[int i] => _seconds.ValueAt(i);
 
     /// <summary>Yeni ölçüm ekler; bir dakika tamamlandıysa o dakikanın özetini döndürür.</summary>
     public MinuteValue? Add(DateTime time, float value)
     {
-        var sec = (int)(time - Epoch).TotalSeconds;
-        var idx = (_secStart + _secCount) % _secValues.Length;
-        if (_secCount < _secValues.Length) _secCount++;
-        else _secStart = (_secStart + 1) % _secValues.Length;
-        _secTimes[idx] = sec;
-        _secValues[idx] = value;
+        _seconds.Push((int)(time - Epoch).TotalSeconds, value);
 
-        var minute = new DateTime(time.Year, time.Month, time.Day, time.Hour, time.Minute, 0, time.Kind);
+        var minute = MinuteIndex(time);
         MinuteValue? completed = null;
         if (_n > 0 && minute != _curMinute)
         {
-            completed = new MinuteValue(_curMinute, (float)(_sum / _n), _max);
-            PushMinute(completed.Value);
+            var avg = (float)(_sum / _n);
+            _minutes.Push(_curMinute, avg);
+            completed = new MinuteValue(MinuteTime(_curMinute), avg);
             _sum = 0;
             _n = 0;
-            _max = float.MinValue;
         }
         _curMinute = minute;
         _sum += value;
         _n++;
-        _max = Math.Max(_max, value);
         return completed;
     }
 
@@ -72,54 +65,112 @@ public sealed class SensorHistory
     public void Prefill(IReadOnlyList<MinuteValue> older)
     {
         if (older.Count == 0) return;
-        var firstOwn = _minCount > 0 ? _minutes[_minStart].Minute : DateTime.MaxValue;
-        var existing = Enumerable.Range(0, _minCount).Select(i => _minutes[(_minStart + i) % _minutes.Length]).ToList();
-        var merged = older.Where(m => m.Minute < firstOwn).Concat(existing).TakeLast(_minutes.Length).ToList();
-        _minStart = 0;
-        _minCount = merged.Count;
-        for (var i = 0; i < merged.Count; i++) _minutes[i] = merged[i];
-    }
-
-    private void PushMinute(MinuteValue m)
-    {
-        var idx = (_minStart + _minCount) % _minutes.Length;
-        if (_minCount < _minutes.Length) _minCount++;
-        else _minStart = (_minStart + 1) % _minutes.Length;
-        _minutes[idx] = m;
+        var firstOwn = _minutes.Count > 0 ? _minutes.TimeAt(0) : int.MaxValue;
+        var merged = new List<(int Time, float Value)>(Math.Min(older.Count + _minutes.Count, MinuteCapacity));
+        foreach (var m in older)
+        {
+            var t = MinuteIndex(m.Minute);
+            if (t < firstOwn) merged.Add((t, m.Avg));
+        }
+        for (var i = 0; i < _minutes.Count; i++) merged.Add((_minutes.TimeAt(i), _minutes.ValueAt(i)));
+        _minutes.Reset(merged.Count > MinuteCapacity ? merged.GetRange(merged.Count - MinuteCapacity, MinuteCapacity) : merged);
     }
 
     /// <summary>Grafik için noktalar. 1 saate kadar saniyelik, üstü dakikalık veri.</summary>
     public List<TimedValue> GetPoints(TimeSpan range, DateTime now)
     {
         var from = now - range;
-        var result = new List<TimedValue>();
         if (range <= TimeSpan.FromHours(1))
         {
             var fromSec = (int)(from - Epoch).TotalSeconds;
-            for (var i = 0; i < _secCount; i++)
-            {
-                var k = (_secStart + i) % _secValues.Length;
-                if (_secTimes[k] >= fromSec) result.Add(new TimedValue(Epoch.AddSeconds(_secTimes[k]), _secValues[k]));
-            }
+            var first = _seconds.FirstIndexAtOrAfter(fromSec);
+            var result = new List<TimedValue>(_seconds.Count - first);
+            for (var i = first; i < _seconds.Count; i++)
+                result.Add(new TimedValue(Epoch.AddSeconds(_seconds.TimeAt(i)), _seconds.ValueAt(i)));
+            return result;
         }
         else
         {
-            for (var i = 0; i < _minCount; i++)
-            {
-                var m = _minutes[(_minStart + i) % _minutes.Length];
-                if (m.Minute >= from) result.Add(new TimedValue(m.Minute.AddSeconds(30), m.Avg));
-            }
+            var first = _minutes.FirstIndexAtOrAfter(MinuteIndex(from) + (from.Second > 0 || from.Millisecond > 0 ? 1 : 0));
+            var result = new List<TimedValue>(_minutes.Count - first + 1);
+            for (var i = first; i < _minutes.Count; i++)
+                result.Add(new TimedValue(MinuteTime(_minutes.TimeAt(i)).AddSeconds(30), _minutes.ValueAt(i)));
             if (_n > 0) result.Add(new TimedValue(now, (float)(_sum / _n)));
+            return result;
         }
-        return result;
     }
 
     public IEnumerable<MinuteValue> Minutes(DateTime from)
     {
-        for (var i = 0; i < _minCount; i++)
+        var start = MinuteIndex(from) + (from.Second > 0 || from.Millisecond > 0 ? 1 : 0);
+        for (var i = _minutes.FirstIndexAtOrAfter(start); i < _minutes.Count; i++)
+            yield return new MinuteValue(MinuteTime(_minutes.TimeAt(i)), _minutes.ValueAt(i));
+    }
+
+    private static int MinuteIndex(DateTime t) => (int)Math.Floor((t - EpochMinute).TotalMinutes);
+    private static DateTime MinuteTime(int index) => EpochMinute.AddMinutes(index);
+
+    /// <summary>
+    /// (zaman, değer) halka tamponu. Dolana kadar doğrusal büyür (başlangıç hep 0), dolunca en eskinin üstüne yazar.
+    /// Zamanlar artan sırada eklendiği için aralık başı ikili aramayla bulunur.
+    /// </summary>
+    private sealed class Ring(int capacity)
+    {
+        private int[] _times = [];
+        private float[] _values = [];
+        private int _start;
+
+        public int Count { get; private set; }
+
+        public int TimeAt(int i) => _times[(_start + i) % _times.Length];
+        public float ValueAt(int i) => _values[(_start + i) % _values.Length];
+
+        public void Push(int time, float value)
         {
-            var m = _minutes[(_minStart + i) % _minutes.Length];
-            if (m.Minute >= from) yield return m;
+            if (Count < capacity)
+            {
+                if (Count == _times.Length) Grow();
+                _times[Count] = time;
+                _values[Count] = value;
+                Count++;
+                return;
+            }
+            _times[_start] = time;
+            _values[_start] = value;
+            _start = (_start + 1) % capacity;
+        }
+
+        public void Reset(List<(int Time, float Value)> items)
+        {
+            var size = Math.Max(items.Count, Math.Min(_times.Length, capacity));
+            if (_times.Length < size)
+            {
+                _times = new int[size];
+                _values = new float[size];
+            }
+            for (var i = 0; i < items.Count; i++) (_times[i], _values[i]) = items[i];
+            _start = 0;
+            Count = items.Count;
+        }
+
+        /// <summary>Zamanı <paramref name="time"/> ya da sonrası olan ilk kaydın sırası (yoksa Count).</summary>
+        public int FirstIndexAtOrAfter(int time)
+        {
+            int lo = 0, hi = Count;
+            while (lo < hi)
+            {
+                var mid = (lo + hi) >>> 1;
+                if (TimeAt(mid) < time) lo = mid + 1; else hi = mid;
+            }
+            return lo;
+        }
+
+        private void Grow()
+        {
+            // Dolmadan önce başlangıç hep 0: doğrudan kopyalanabilir.
+            var size = Math.Min(capacity, Math.Max(64, _times.Length * 2));
+            Array.Resize(ref _times, size);
+            Array.Resize(ref _values, size);
         }
     }
 }
@@ -225,7 +276,7 @@ public sealed class HistoryRecorder : IDisposable
                 {
                     if (!float.TryParse(parts[i], NumberStyles.Float, inv, out var v)) continue;
                     if (!result.TryGetValue(cols[i - 1], out var list)) result[cols[i - 1]] = list = [];
-                    list.Add(new MinuteValue(t, v, v));
+                    list.Add(new MinuteValue(t, v));
                 }
             }
         }

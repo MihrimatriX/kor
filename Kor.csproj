@@ -22,11 +22,13 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\kor.ico</ApplicationIcon>
 
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
     <Product>Kor</Product>
     <Company>side project GAMES</Company>
     <Description>Kor — sıcaklık, fan ve disk izleyici</Description>
     <SatelliteResourceLanguages>tr;en</SatelliteResourceLanguages>
+    <!-- Gün boyu arka planda çalışan, yığını küçük bir uygulama: ayrı arka plan GC thread'ine ve ek belleğine gerek yok -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <!-- WFO0003: WinForms'un DPI uyarısı; DPI ayarı WPF için manifest'te bilinçli olarak duruyor -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
