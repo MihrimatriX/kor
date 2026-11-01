@@ -276,7 +276,7 @@ public sealed class SingleInstance : IDisposable
             var deadline = DateTime.UtcNow + timeout;
             while (DateTime.UtcNow < deadline)
             {
-                if (!Mutex.TryOpenExisting(Name, out var m)) return true;
+                if (!Mutex.TryOpenExisting(Name, out var m)) return WaitForOtherInstancesToExit(deadline);
                 m.Dispose();
                 Thread.Sleep(200);
             }
@@ -286,6 +286,33 @@ public sealed class SingleInstance : IDisposable
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Kilit, uygulama kapanmaya başlarken bırakılır; süreç birkaç yüz ms daha yaşayıp dosyalarını tutabilir.
+    /// Kurulum dosyaları değiştirmeden önce aynı exe'den çalışan diğer Kor süreçlerinin gerçekten bitmesini bekler.
+    /// </summary>
+    private static bool WaitForOtherInstancesToExit(DateTime deadline)
+    {
+        var self = Environment.ProcessId;
+        var path = Environment.ProcessPath;
+        foreach (var p in System.Diagnostics.Process.GetProcessesByName(System.IO.Path.GetFileNameWithoutExtension(path ?? "Kor")))
+        {
+            using (p)
+            {
+                try
+                {
+                    if (p.Id == self) continue;
+                    var left = deadline - DateTime.UtcNow;
+                    if (left <= TimeSpan.Zero || !p.WaitForExit(left)) return false;
+                }
+                catch
+                {
+                    // Erişilemeyen ya da bu arada kapanan süreç
+                }
+            }
+        }
+        return true;
     }
 
     public void Dispose()

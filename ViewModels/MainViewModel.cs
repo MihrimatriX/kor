@@ -759,6 +759,11 @@ public sealed partial class MainViewModel : ObservableObject
             case AppSettings.WidgetItemChanged:
             case nameof(AppSettings.Widgets):
                 RebuildWidgetsIfNeeded(force: true);
+                // Gizliyken tazelenmeyen widget yeniden gösterilince eski değerlerle açılmasın
+                foreach (var w in Widgets)
+                {
+                    if (w.Config.Visible) w.Refresh();
+                }
                 Updated?.Invoke();
                 break;
 

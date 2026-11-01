@@ -285,8 +285,14 @@ public sealed partial class MainViewModel
         Interlocked.Exchange(ref _remoteRequestedAt, now);
         if (now - Interlocked.Read(ref _remoteBuiltAt) > 2500)
         {
-            try { _dispatcher.Invoke(UpdateRemoteJson, System.Windows.Threading.DispatcherPriority.Normal, CancellationToken.None, TimeSpan.FromSeconds(2)); }
-            catch { /* uygulama kapanıyor ya da UI meşgul: eldeki veriyle cevap ver */ }
+            // Sunucunun await devamları UI thread'inde de çalışabilir: oradaysak doğrudan kur
+            // (Invoke iç içe bir mesaj döngüsü açardı).
+            if (_dispatcher.CheckAccess()) UpdateRemoteJson();
+            else
+            {
+                try { _dispatcher.Invoke(UpdateRemoteJson, System.Windows.Threading.DispatcherPriority.Normal, CancellationToken.None, TimeSpan.FromSeconds(2)); }
+                catch { /* uygulama kapanıyor ya da UI meşgul: eldeki veriyle cevap ver */ }
+            }
         }
         return _remoteJson;
     }
