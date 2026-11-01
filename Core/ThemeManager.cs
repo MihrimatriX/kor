@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
+using static Kor.Infrastructure.Paint;
 
 namespace Kor.Core;
 
@@ -117,13 +118,6 @@ public static class ThemeManager
     /// <summary>Grafik gibi kod içinde çizilen kontroller için güncel tema fırçası.</summary>
     public static Brush Brush(string key, Brush fallback)
         => Application.Current?.TryFindResource(key) as Brush ?? fallback;
-
-    private static SolidColorBrush Frozen(Color c)
-    {
-        var b = new SolidColorBrush(c);
-        b.Freeze();
-        return b;
-    }
 
     private static Color WithAlpha(Color c, byte a) => Color.FromArgb(a, c.R, c.G, c.B);
 

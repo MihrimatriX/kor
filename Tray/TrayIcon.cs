@@ -24,7 +24,8 @@ public sealed partial class TrayIcon : IDisposable
     private readonly WinForms.NotifyIcon _icon;
     private readonly Icon _appIcon;
     private readonly Wpf.ContextMenu _menu;
-    private readonly string? _fontName;
+    // Yüklü yazı tiplerini taramak açılışı yavaşlatır: sadece tepside sıcaklık ilk kez çizilirken bakılır.
+    private readonly Lazy<string?> _fontName = new(PickFont);
 
     private nint _dynamicHandle;
     private Icon? _dynamicIcon;
@@ -35,7 +36,6 @@ public sealed partial class TrayIcon : IDisposable
     {
         _vm = vm;
         _appIcon = LoadAppIcon();
-        _fontName = PickFont();
 
         _icon = new WinForms.NotifyIcon
         {
@@ -254,9 +254,10 @@ public sealed partial class TrayIcon : IDisposable
                 g.FillRectangle(bar, size * 0.2f, size - Math.Max(2, size / 9f) - 1, size * 0.6f, Math.Max(2, size / 9f));
 
             var fontSize = size * (text.Length >= 3 ? 0.52f : 0.66f);
-            using var font = _fontName is null
+            var fontName = _fontName.Value;
+            using var font = fontName is null
                 ? new Font(System.Drawing.FontFamily.GenericSansSerif, fontSize, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel)
-                : new Font(_fontName, fontSize, System.Drawing.FontStyle.Regular, GraphicsUnit.Pixel);
+                : new Font(fontName, fontSize, System.Drawing.FontStyle.Regular, GraphicsUnit.Pixel);
             using var brush = new SolidBrush(Color.FromArgb(245, 245, 248));
             using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
             g.DrawString(text, font, brush, new RectangleF(-1, -size * 0.06f, size + 2, size), format);

@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using Kor.Core;
 using Kor.ViewModels;
+using static Kor.Infrastructure.Paint;
 
 namespace Kor.Controls;
 
@@ -22,7 +23,7 @@ public sealed class HistoryChart : FrameworkElement
     private static Brush LabelBrush => ThemeManager.Brush("B.ChartLabel", Brushes.Gray);
     private static Brush TipBack => ThemeManager.Brush("B.TipBg", Brushes.Black);
     private static Brush TipBorder => ThemeManager.Brush("B.Control", Brushes.DimGray);
-    private static readonly Brush ThresholdBrush = Frozen(Color.FromArgb(0x99, 0xFB, 0x92, 0x3C));
+    private static readonly Pen ThresholdPen = Frozen(new Pen(Frozen(Color.FromArgb(0x99, 0xFB, 0x92, 0x3C)), 1) { DashStyle = Frozen(new DashStyle([4, 4], 0)) });
     private static readonly Typeface Face = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
 
     public static readonly DependencyProperty SeriesProperty = DependencyProperty.Register(
@@ -135,8 +136,7 @@ public sealed class HistoryChart : FrameworkElement
         if (!double.IsNaN(Threshold) && Threshold >= lo && Threshold <= hi)
         {
             var y = Y(Threshold);
-            var pen = new Pen(ThresholdBrush, 1) { DashStyle = new DashStyle([4, 4], 0) };
-            dc.DrawLine(pen, new Point(plot.Left, y), new Point(plot.Right, y));
+            dc.DrawLine(ThresholdPen, new Point(plot.Left, y), new Point(plot.Right, y));
         }
 
         dc.PushClip(new RectangleGeometry(new Rect(plot.Left, plot.Top - 2, plot.Width, plot.Height + 4)));
@@ -261,12 +261,6 @@ public sealed class HistoryChart : FrameworkElement
     private static FormattedText Text(string s, double size, Brush brush, double dpi)
         => new(s, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Face, size, brush, dpi);
 
-    private static Brush Frozen(Color c)
-    {
-        var b = new SolidColorBrush(c);
-        b.Freeze();
-        return b;
-    }
 }
 
 /// <summary>

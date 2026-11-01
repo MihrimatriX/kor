@@ -47,7 +47,7 @@ public sealed partial class MainViewModel
     private void OnWidgetConfigsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         SyncWidgets();
-        RebuildWidgetsIfNeeded();
+        RebuildWidgetsIfNeeded(force: true);
     }
 
     private void SyncWidgets()
@@ -131,14 +131,40 @@ public sealed partial class MainViewModel
         return list;
     }
 
+    private bool _widgetsDirty = true;
+    private int _widgetVolatile;
+
+    /// <summary>Tüm widget'ların içeriğini bir sonraki turda baştan kurdurur.</summary>
     private void InvalidateWidgets()
     {
         foreach (var w in Widgets) w.Key = "";
+        _widgetsDirty = true;
     }
 
-    /// <summary>Widget içeriği değiştiyse (fan dönmeye başladı, oyun açıldı, ad değişti, ayar...) yeniden kurar.</summary>
-    private void RebuildWidgetsIfNeeded()
+    /// <summary>
+    /// Ölçümden ölçüme değişebilen ve widget içeriğini etkileyen durum: FPS geldi/gitti, boş fan dönmeye başladı.
+    /// Geri kalan her şey (ad, ayar, sensör kümesi, oyun, disk) değişince <see cref="InvalidateWidgets"/> çağrılır.
+    /// </summary>
+    private int WidgetVolatileState()
     {
+        var hash = new HashCode();
+        hash.Add(_fps?.Value is not null);
+        if (Settings.HideIdleFans)
+            foreach (var fan in _allFans) hash.Add(fan.IsIdle);
+        return hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Widget içeriği değiştiyse (fan dönmeye başladı, oyun açıldı, ad değişti, ayar...) yeniden kurar.
+    /// Her ölçümde çağrılır ama bir şey değişmediyse hemen döner; değiştiyse sadece etkilenen widget'lar kurulur.
+    /// </summary>
+    private void RebuildWidgetsIfNeeded(bool force = false)
+    {
+        var volatileState = WidgetVolatileState();
+        if (!force && !_widgetsDirty && volatileState == _widgetVolatile) return;
+        _widgetsDirty = false;
+        _widgetVolatile = volatileState;
+
         var pinnedMode = Settings.PinnedSensorIds.Count > 0;
         foreach (var w in Widgets)
         {

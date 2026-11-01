@@ -38,8 +38,11 @@ public partial class DetailsWindow : Window
         SourceInitialized += (_, _) => ApplyChrome();
         ThemeManager.Changed += ApplyChrome;
         Closed += (_, _) => ThemeManager.Changed -= ApplyChrome;
-        StateChanged += (_, _) => UpdateMaximizedMargin();
-        Loaded += (_, _) => vm.ChartsActive = true;
+        // Grafik verisi sadece pencere ekrandayken hazırlansın (simge durumunda / gizliyken boşuna çalışmasın)
+        void SyncCharts() => vm.ChartsActive = IsLoaded && IsVisible && WindowState != WindowState.Minimized;
+        StateChanged += (_, _) => { UpdateMaximizedMargin(); SyncCharts(); };
+        IsVisibleChanged += (_, _) => SyncCharts();
+        Loaded += (_, _) => SyncCharts();
         Closed += (_, _) => vm.ChartsActive = false;
         KeyDown += (_, e) =>
         {

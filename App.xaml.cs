@@ -206,6 +206,7 @@ public partial class App : Application
                 game = await Task.Run(() => GameDetector.Detect(list, auto));
             }
             ViewModel.SetGame(game);
+            _fps?.SetGameActive(game is not null);
         }
         catch (Exception ex)
         {
@@ -230,6 +231,7 @@ public partial class App : Application
         if (_fps is null)
         {
             _fps = _demo ? new DemoFpsSource() : new EtwFpsMonitor(ViewModel.IsAdmin);
+            _fps.SetGameActive(ViewModel.IsGameActive);
         }
         ViewModel.SetFpsStatus(_fps.Status);
     }

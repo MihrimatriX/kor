@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 using Kor.Core;
 using Kor.Infrastructure;
 using LibreHardwareMonitor.Hardware;
+using static Kor.Infrastructure.Paint;
 
 namespace Kor.ViewModels;
 
@@ -216,6 +217,12 @@ public sealed partial class MainViewModel
 
     private RemoteServer? _remote;
     private volatile string _remoteJson = "{}";
+    private readonly System.Windows.Threading.Dispatcher _dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+    private long _remoteRequestedAt = long.MinValue / 2;
+    private long _remoteBuiltAt = long.MinValue / 2;
+
+    /// <summary>Telefon son 5 sn içinde veri istediyse true; değilse JSON her turda boşuna kurulmaz.</summary>
+    private bool RemoteWatched => _remote is not null && Environment.TickCount64 - Interlocked.Read(ref _remoteRequestedAt) < 5000;
 
     private string? _remoteUrl;
     public string? RemoteUrl { get => _remoteUrl; private set => Set(ref _remoteUrl, value); }
@@ -240,11 +247,10 @@ public sealed partial class MainViewModel
         {
             try
             {
-                _remote = new RemoteServer(Settings.RemotePort, Settings.RemoteToken, () => _remoteJson);
+                _remote = new RemoteServer(Settings.RemotePort, Settings.RemoteToken, RemoteJsonForRequest);
                 var ip = RemoteServer.LanAddress();
                 RemoteUrl = $"http://{ip ?? "localhost"}:{Settings.RemotePort}/?t={Settings.RemoteToken}";
                 RemoteStatus = ip is null ? "Açık, ama yerel ağ bağlantısı bulunamadı" : "Açık";
-                UpdateRemoteJson();
             }
             catch (SocketException ex)
             {
@@ -269,10 +275,27 @@ public sealed partial class MainViewModel
 
     private static readonly JsonSerializerOptions RemoteJsonOptions = new() { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
 
+    /// <summary>
+    /// Sunucu thread'inden çağrılır. Telefon bir süredir sormadıysa elimizdeki JSON bayattır:
+    /// o zaman UI thread'inde hemen tazesini kurdururuz; sonraki isteklerde ölçüm turu zaten günceller.
+    /// </summary>
+    private string RemoteJsonForRequest()
+    {
+        var now = Environment.TickCount64;
+        Interlocked.Exchange(ref _remoteRequestedAt, now);
+        if (now - Interlocked.Read(ref _remoteBuiltAt) > 2500)
+        {
+            try { _dispatcher.Invoke(UpdateRemoteJson, System.Windows.Threading.DispatcherPriority.Normal, CancellationToken.None, TimeSpan.FromSeconds(2)); }
+            catch { /* uygulama kapanıyor ya da UI meşgul: eldeki veriyle cevap ver */ }
+        }
+        return _remoteJson;
+    }
+
     /// <summary>Telefon sayfasının okuduğu JSON (UI thread'inde kurulur, sunucu thread'i sadece string'i okur).</summary>
     private void UpdateRemoteJson()
     {
         if (_remote is null) return;
+        Interlocked.Exchange(ref _remoteBuiltAt, Environment.TickCount64);
         try
         {
             var cfg = new WidgetConfig { ShowFps = false };
@@ -348,7 +371,7 @@ public sealed partial class MainViewModel
     // =====================================================================
 
     public IReadOnlyList<AccentOption> AccentOptions { get; } = ThemeManager.Accents
-        .Select(a => new AccentOption(a.Key, a.Name, FrozenColor(a.Color)))
+        .Select(a => new AccentOption(a.Key, a.Name, Frozen(a.Color)))
         .ToList();
 
     public ICommand SelectAccentCommand { get; private set; } = null!;
@@ -358,12 +381,6 @@ public sealed partial class MainViewModel
         foreach (var o in AccentOptions) o.IsSelected = o.Key == Settings.Accent;
     }
 
-    private static Brush FrozenColor(Color c)
-    {
-        var b = new SolidColorBrush(c);
-        b.Freeze();
-        return b;
-    }
 
     // =====================================================================
     //  Güncellemeler
